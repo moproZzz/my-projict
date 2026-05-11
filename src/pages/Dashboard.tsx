@@ -5,11 +5,13 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area 
 } from 'recharts';
 import { 
-  TrendingUp, Package, ShoppingCart, AlertCircle, Users, ArrowUpRight, ArrowDownRight 
+  TrendingUp, Package, ShoppingCart, AlertCircle, Users, ArrowUpRight, ArrowDownRight, Plus
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
+import { getDoc, doc } from 'firebase/firestore';
+import { SystemSettings } from '../types';
 
 const StatsCard = ({ title, value, icon: Icon, color, trend, extraBold }: any) => (
   <div className={`bg-white p-5 rounded-xl border border-slate-200 shadow-sm ${extraBold ? 'border-r-4 border-r-amber-500' : ''}`}>
@@ -35,20 +37,66 @@ const StatsCard = ({ title, value, icon: Icon, color, trend, extraBold }: any) =
 
 const Dashboard = () => {
   const [stats, setStats] = useState({
-    totalProducts: '4,280',
-    lowStock: 18,
-    todaySales: '12,450 ر.س',
-    monthlyProfit: '89,200 ر.س',
+    totalProducts: '0',
+    lowStock: 0,
+    todaySales: '0',
+    monthlyProfit: '0',
   });
+  const [loading, setLoading] = useState(true);
+  const [currency, setCurrency] = useState('جنية مصري');
+
+  const fetchStats = async () => {
+    try {
+      // Fetch settings
+      const settingsSnap = await getDoc(doc(db, 'settings', 'system'));
+      let currentCurrency = 'جنية مصري';
+      if (settingsSnap.exists()) {
+        const s = settingsSnap.data() as SystemSettings;
+        currentCurrency = s.currency;
+        setCurrency(s.currency);
+      }
+
+      // Fetch total products
+      const productsSnap = await getDocs(collection(db, 'products'));
+      const totalDocs = productsSnap.docs;
+      const totalProductsCount = totalDocs.length;
+      const lowStockCount = totalDocs.filter(d => (d.data().stock || 0) <= 5).length;
+
+      // Fetch today's sales
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      const salesQuery = query(collection(db, 'sales'), where('createdAt', '>=', startOfDay));
+      const salesSnap = await getDocs(salesQuery);
+      let todayTotal = 0;
+      salesSnap.forEach(doc => {
+        todayTotal += doc.data().finalAmount || 0;
+      });
+
+      setStats({
+        totalProducts: totalProductsCount.toLocaleString(),
+        lowStock: lowStockCount,
+        todaySales: `${todayTotal.toLocaleString()}`,
+        monthlyProfit: '0',
+      });
+    } catch (error) {
+      console.error('Error fetching dashboard stats:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchStats();
+  }, []);
 
   const chartData = [
-    { name: 'السبت', sales: 4000 },
-    { name: 'الأحد', sales: 3000 },
-    { name: 'الإثنين', sales: 2000 },
-    { name: 'الثلاثاء', sales: 2780 },
-    { name: 'الأربعاء', sales: 1890 },
-    { name: 'الخميس', sales: 2390 },
-    { name: 'الجمعة', sales: 3490 },
+    { name: 'السبت', sales: 0 },
+    { name: 'الأحد', sales: 0 },
+    { name: 'الإثنين', sales: 0 },
+    { name: 'الثلاثاء', sales: 0 },
+    { name: 'الأربعاء', sales: 0 },
+    { name: 'الخميس', sales: 0 },
+    { name: 'الجمعة', sales: 0 },
   ];
 
   return (
@@ -67,30 +115,28 @@ const Dashboard = () => {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatsCard 
           title="إجمالي المنتجات" 
-          value={stats.totalProducts} 
+          value={loading ? '...' : stats.totalProducts} 
           icon={Package} 
           color="bg-blue-50 text-blue-600"
-          trend={{ value: 12, positive: true }}
         />
         <StatsCard 
           title="نواقص المخزون" 
-          value={stats.lowStock} 
+          value={loading ? '...' : stats.lowStock} 
           icon={AlertCircle} 
           color="bg-amber-50 text-amber-600"
-          extraBold={true}
+          extraBold={stats.lowStock > 0}
         />
         <StatsCard 
           title="مبيعات اليوم" 
-          value={stats.todaySales} 
+          value={loading ? '...' : `${stats.todaySales} ${currency}`} 
           icon={ShoppingCart} 
           color="bg-indigo-50 text-indigo-600"
         />
         <StatsCard 
           title="أرباح الشهر" 
-          value={stats.monthlyProfit} 
+          value={loading ? '...' : `${stats.monthlyProfit} ${currency}`} 
           icon={TrendingUp} 
           color="bg-emerald-50 text-emerald-600"
-          trend={{ value: 2.4, positive: true }}
         />
       </div>
 
@@ -128,26 +174,7 @@ const Dashboard = () => {
             <h3 className="font-bold text-slate-800">أحدث العمليات</h3>
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {[
-              { type: 'sale', title: 'فاتورة بيع جديدة', sub: '#INV-2940', time: 'قبل ٥ دقائق', amount: '١،٤٠٠ ر.س', positive: true },
-              { type: 'stock', title: 'استلام شحنة', sub: 'S-802', time: 'قبل ١٨ دقيقة', amount: '٥٠ قطعة', positive: true },
-              { type: 'alert', title: 'تنبيه: نفاذ كمية', sub: 'آيفون ١٥', time: 'قبل ساعة', amount: '٢ قطعة', positive: false },
-            ].map((op, i) => (
-              <div key={i} className="flex items-start gap-3">
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
-                  op.type === 'sale' ? 'bg-emerald-100 text-emerald-600' : 
-                  op.type === 'stock' ? 'bg-blue-100 text-blue-600' : 'bg-amber-100 text-amber-600'
-                }`}>
-                  {op.type === 'sale' && <ArrowUpRight className="w-4 h-4" />}
-                  {op.type === 'stock' && <Plus className="w-4 h-4" />}
-                  {op.type === 'alert' && <AlertCircle className="w-4 h-4" />}
-                </div>
-                <div className="text-sm">
-                  <div className="font-medium text-slate-700">{op.title} <span className="font-bold text-slate-900">{op.sub}</span></div>
-                  <div className="text-[10px] text-slate-400">{op.time} • {op.amount}</div>
-                </div>
-              </div>
-            ))}
+            <div className="h-full flex items-center justify-center text-slate-400 text-xs italic">لا توجد عمليات مضافة حالياً</div>
           </div>
           <button className="p-4 text-center text-xs font-bold text-indigo-600 hover:bg-slate-50 transition-colors border-t border-slate-100">
             عرض كل النشاطات

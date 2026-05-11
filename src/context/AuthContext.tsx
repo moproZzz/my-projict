@@ -1,11 +1,11 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, getDoc, setDoc, collection, query, getDocs, limit } from 'firebase/firestore';
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
-import { UserProfile, UserRole } from '../types';
+import { UserRole, UserProfile } from '../types';
 
 interface AuthContextType {
-  user: User | null;
+  user: any;
   profile: UserProfile | null;
   loading: boolean;
   isAdmin: boolean;
@@ -13,47 +13,45 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const MOCK_PROFILE: UserProfile = {
+  uid: 'admin-user',
+  name: 'مدير النظام',
+  email: 'admin@example.com',
+  role: UserRole.ADMIN,
+  createdAt: new Date().toISOString(),
+};
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setUser(user);
-      if (user) {
-        const profileDoc = await getDoc(doc(db, 'users', user.uid));
-        if (profileDoc.exists()) {
-          setProfile(profileDoc.data() as UserProfile);
-        } else {
-          // Check if any users exist to determine if this is the first user (admin)
-          const usersSnap = await getDocs(query(collection(db, 'users'), limit(1)));
-          const isFirstUser = usersSnap.empty;
-          
-          const newProfile: UserProfile = {
-            uid: user.uid,
-            name: user.displayName || 'مستخدم جديد',
-            email: user.email || '',
-            role: isFirstUser ? UserRole.ADMIN : UserRole.EMPLOYEE,
-            createdAt: new Date().toISOString(),
-          };
-          await setDoc(doc(db, 'users', user.uid), newProfile);
-          setProfile(newProfile);
-        }
-      } else {
-        setProfile(null);
+    // حاول تسجيل الدخول المجهول ليكون هناك جلسة نشطة للقواعد الأمنية
+    const login = async () => {
+      try {
+        await signInAnonymously(auth);
+      } catch (err) {
+        console.error("Anonymous login failed. Make sure it's enabled in Firebase Console.", err);
       }
+    };
+
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
       setLoading(false);
     });
 
+    login();
     return () => unsubscribe();
   }, []);
 
-  const isAdmin = profile?.role === UserRole.ADMIN;
-
   return (
-    <AuthContext.Provider value={{ user, profile, loading, isAdmin }}>
-      {children}
+    <AuthContext.Provider value={{ 
+      user, 
+      profile: MOCK_PROFILE, 
+      loading, 
+      isAdmin: true 
+    }}>
+      {!loading && children}
     </AuthContext.Provider>
   );
 };

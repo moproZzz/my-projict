@@ -1,17 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { collection, query, onSnapshot, addDoc, serverTimestamp, doc, updateDoc, increment } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { Product, SaleItem, Sale } from '../types';
+import { Product, SaleItem, Sale, SystemSettings } from '../types';
 import { Search, ShoppingCart, Plus, Minus, Trash2, CheckCircle, Package, Printer } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../context/AuthContext';
 import { useReactToPrint } from 'react-to-print';
+import { getDoc } from 'firebase/firestore';
 
-const Receipt = React.forwardRef(({ sale }: { sale: any }, ref: any) => (
+const Receipt = React.forwardRef(({ sale, settings }: { sale: any, settings: any }, ref: any) => (
   <div ref={ref} className="p-8 text-right font-sans" dir="rtl">
     <div className="text-center mb-6">
-      <h2 className="text-2xl font-bold">مخزون - فاتورة مبيعات</h2>
-      <p className="text-gray-500">الرقم الضريبي: ١٢٣٤٥٦٧٨٩</p>
+      <h2 className="text-2xl font-bold">{settings?.companyName || 'هويدي'}</h2>
+      <p className="text-gray-500">فاتورة مبيعات مبسطة</p>
       <p className="text-sm">رقم الفاتورة: {sale?.invoiceNumber}</p>
       <p className="text-sm">التاريخ: {new Date().toLocaleString('ar-SA')}</p>
     </div>
@@ -34,9 +35,9 @@ const Receipt = React.forwardRef(({ sale }: { sale: any }, ref: any) => (
       </tbody>
     </table>
     <div className="space-y-1 text-left">
-      <p>المجموع: {sale?.totalAmount.toFixed(2)} ر.س</p>
-      <p>الضريبة (١٥٪): {sale?.taxAmount.toFixed(2)} ر.س</p>
-      <h3 className="text-xl font-bold">الإجمالي: {sale?.finalAmount.toFixed(2)} ر.س</h3>
+      <p>المجموع: {sale?.totalAmount.toFixed(2)} {sale?.currency || 'ر.س'}</p>
+      <p>الضريبة ({sale?.taxRate || 0}٪): {sale?.taxAmount.toFixed(2)} {sale?.currency || 'ر.س'}</p>
+      <h3 className="text-xl font-bold">الإجمالي: {sale?.finalAmount.toFixed(2)} {sale?.currency || 'ر.س'}</h3>
     </div>
     <div className="mt-10 text-center text-xs text-gray-400">
       <p>شكراً لزيارتكم</p>
@@ -49,7 +50,11 @@ const Pos = () => {
   const [cart, setCart] = useState<SaleItem[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [discount, setDiscount] = useState(0);
-  const [taxRate] = useState(0.15); // 15% VAT
+  const [settings, setSettings] = useState<SystemSettings>({
+    companyName: 'هويدي',
+    currency: 'جنية مصري',
+    taxRate: 0,
+  });
   const [loading, setLoading] = useState(true);
   const [checkoutSuccess, setCheckoutSuccess] = useState(false);
   const [lastSale, setLastSale] = useState<any>(null);
@@ -61,7 +66,19 @@ const Pos = () => {
   });
 
   useEffect(() => {
-    // ... same as before
+    // Fetch settings
+    const fetchSettings = async () => {
+      try {
+        const docSnap = await getDoc(doc(db, 'settings', 'system'));
+        if (docSnap.exists()) {
+          setSettings(docSnap.data() as SystemSettings);
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    fetchSettings();
+
     const q = query(collection(db, 'products'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const prods: Product[] = [];
@@ -118,7 +135,7 @@ const Pos = () => {
   };
 
   const totalBeforeTax = cart.reduce((sum, item) => sum + item.total, 0);
-  const taxAmount = totalBeforeTax * taxRate;
+  const taxAmount = totalBeforeTax * (settings.taxRate / 100);
   const finalAmount = totalBeforeTax + taxAmount - discount;
 
   const handleCheckout = async () => {
@@ -130,6 +147,8 @@ const Pos = () => {
         taxAmount,
         discountAmount: discount,
         finalAmount,
+        currency: settings.currency,
+        taxRate: settings.taxRate,
         paymentMethod: 'نقدي',
         createdAt: serverTimestamp(),
         invoiceNumber: `INV-${Date.now()}`,
@@ -164,7 +183,7 @@ const Pos = () => {
   return (
     <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-140px)]">
       <div style={{ display: 'none' }}>
-        <Receipt ref={componentRef} sale={lastSale} />
+        <Receipt ref={componentRef} sale={lastSale} settings={settings} />
       </div>
       {/* Products Selection Section */}
       <div className="flex-1 flex flex-col gap-4 min-w-0">
@@ -197,7 +216,7 @@ const Pos = () => {
                 </div>
                 <h4 className="font-bold text-slate-900 truncate text-xs mb-1">{product.name}</h4>
                 <div className="mt-auto flex items-center justify-between">
-                  <p className="text-indigo-600 font-black text-sm">{product.sellingPrice} ر.س</p>
+                  <p className="text-indigo-600 font-black text-sm">{product.sellingPrice} {settings.currency}</p>
                   <p className={`text-[10px] font-bold ${product.stock <= 5 ? 'text-red-500' : 'text-slate-400'}`}>مخزون: {product.stock}</p>
                 </div>
               </motion.button>
@@ -234,7 +253,7 @@ const Pos = () => {
               >
                 <div className="flex-1 min-w-0">
                   <p className="font-bold text-slate-900 truncate text-[11px] mb-0.5">{item.productName}</p>
-                  <p className="text-xs font-black text-indigo-600">{item.total.toFixed(2)} ر.س</p>
+                  <p className="text-xs font-black text-indigo-600">{item.total.toFixed(2)} {settings.currency}</p>
                 </div>
                 <div className="flex items-center gap-1 bg-white rounded-md border border-slate-200 px-1">
                   <button onClick={() => updateQuantity(item.productId, -1)} className="p-0.5 hover:bg-slate-100 rounded text-slate-500"><Minus className="w-3 h-3" /></button>
@@ -250,15 +269,15 @@ const Pos = () => {
         <div className="p-4 bg-slate-50 border-t border-slate-100 space-y-2 text-xs">
           <div className="flex items-center justify-between text-slate-500">
             <span>المجموع</span>
-            <span className="font-bold">{totalBeforeTax.toFixed(2)} ر.س</span>
+            <span className="font-bold">{totalBeforeTax.toFixed(2)} {settings.currency}</span>
           </div>
           <div className="flex items-center justify-between text-slate-500">
-            <span>الضريبة (١٥٪)</span>
-            <span className="font-bold">{taxAmount.toFixed(2)} ر.س</span>
+            <span>الضريبة ({settings.taxRate}٪)</span>
+            <span className="font-bold">{taxAmount.toFixed(2)} {settings.currency}</span>
           </div>
           <div className="pt-2 border-t border-slate-200 flex items-center justify-between">
             <span className="text-sm font-bold text-slate-900">الإجمالي</span>
-            <span className="text-xl font-black text-indigo-700">{finalAmount.toFixed(2)} ر.س</span>
+            <span className="text-xl font-black text-indigo-700">{finalAmount.toFixed(2)} {settings.currency}</span>
           </div>
           
           <button 

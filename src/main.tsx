@@ -4,11 +4,7 @@ import App from './App.tsx';
 import './index.css';
 import { seedData } from './lib/seed.ts';
 
-// Optional: seed data in development
-if (process.env.NODE_ENV !== 'production') {
-  seedData();
-}
-
+// Main entry point
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />
